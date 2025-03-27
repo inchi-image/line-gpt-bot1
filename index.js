@@ -11,6 +11,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 app.post("/webhook", async (req, res) => {
   const events = req.body.events;
+res.status(200).send("OK");
 
   for (let event of events) {
     if (event.type === "message" && event.message.type === "text") {

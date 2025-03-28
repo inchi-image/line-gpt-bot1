@@ -1,5 +1,4 @@
 
-// index.js
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
@@ -40,13 +39,13 @@ app.post("/webhook", async (req, res) => {
     }
 
     if (msg === "AI回覆") {
-      convo.setModeWithExpire(userId, "AI", 0);
+      convo.setMode(userId, "AI");
       await replyText(event.replyToken, "✅ 已切換為 AI 回覆模式。");
       return;
     }
-
     if (msg === "真人客服") {
-      convo.setModeWithExpire(userId, "human", 3600000);
+      convo.setMode(userId, "human");
+      setTimeout(() => convo.setMode(userId, "AI"), 3600000);
       await replyText(event.replyToken, "🧑‍💼 已切換為真人客服接手，我們會盡快與您聯繫。AI 回覆將暫停一小時。");
       return;
     }
@@ -61,8 +60,6 @@ app.post("/webhook", async (req, res) => {
       await replyText(event.replyToken, faqReplies[faqKey]);
       return;
     }
-
-    if (convo.getEffectiveMode(userId) === "human") return;
 
     const step = convo.getUserStep(userId);
 
@@ -109,6 +106,8 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
+    if (convo.getMode(userId) === "human") return;
+
     if (step === -1 || step >= 100) {
       convo.updateUserStep(userId, "company", "", 0);
       await replyText(event.replyToken, "👋 歡迎洽詢報價！請問您的公司名稱是？");
@@ -149,8 +148,11 @@ function replyText(token, text) {
   });
 }
 
-function replyFlex(token, flex) {
-  return axios.post("https://api.line.me/v2/bot/message/reply", flex, {
+function replyFlex(token, messages) {
+  return axios.post("https://api.line.me/v2/bot/message/reply", {
+    replyToken: token,
+    messages
+  }, {
     headers: {
       Authorization: `Bearer ${LINE_ACCESS_TOKEN}`,
       "Content-Type": "application/json"
@@ -159,56 +161,50 @@ function replyFlex(token, flex) {
 }
 
 function contactMethodFlex() {
-  return {
-    replyToken: null,
-    messages: [
-      {
-        type: "flex",
-        altText: "請選擇聯絡方式",
-        contents: {
-          type: "bubble",
-          body: {
-            type: "box",
-            layout: "vertical",
-            spacing: "md",
-            contents: [
-              { type: "text", text: "📞 請選擇聯絡方式：", weight: "bold", wrap: true },
-              {
-                type: "box",
-                layout: "vertical",
-                spacing: "sm",
-                contents: [
-                  { type: "button", style: "primary", action: { type: "message", label: "LINE", text: "LINE" } },
-                  { type: "button", style: "primary", action: { type: "message", label: "電話", text: "電話" } },
-                  { type: "button", style: "primary", action: { type: "message", label: "Email", text: "Email" } }
-                ]
-              }
-            ]
-          }
-        }
-      }
-    ]
-  };
-}
-
-function aiOrHumanChoice() {
-  return {
-    replyToken: null,
-    messages: [
-      {
-        type: "template",
-        altText: "是否轉真人客服",
-        template: {
-          type: "buttons",
-          text: "請選擇後續服務方式：",
-          actions: [
-            { type: "message", label: "由 AI 繼續回覆", text: "AI回覆" },
-            { type: "message", label: "真人客服接手", text: "真人客服" }
+  return [
+    {
+      type: "flex",
+      altText: "請選擇聯絡方式",
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box",
+          layout: "vertical",
+          spacing: "md",
+          contents: [
+            { type: "text", text: "📞 請選擇聯絡方式：", weight: "bold", wrap: true },
+            {
+              type: "box",
+              layout: "vertical",
+              spacing: "sm",
+              contents: [
+                { type: "button", style: "primary", action: { type: "message", label: "LINE", text: "LINE" } },
+                { type: "button", style: "primary", action: { type: "message", label: "電話", text: "電話" } },
+                { type: "button", style: "primary", action: { type: "message", label: "Email", text: "Email" } }
+              ]
+            }
           ]
         }
       }
-    ]
-  };
+    }
+  ];
+}
+
+function aiOrHumanChoice() {
+  return [
+    {
+      type: "template",
+      altText: "是否轉真人客服",
+      template: {
+        type: "buttons",
+        text: "請選擇後續服務方式：",
+        actions: [
+          { type: "message", label: "由 AI 繼續回覆", text: "AI回覆" },
+          { type: "message", label: "真人客服接手", text: "真人客服" }
+        ]
+      }
+    }
+  ];
 }
 
 const PORT = process.env.PORT || 10000;

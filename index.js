@@ -2,8 +2,8 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const axios = require("axios");
-const line = require("@line/bot-sdk");
 const fs = require("fs");
+require("dotenv").config();
 
 const app = express();
 app.use(bodyParser.json());
@@ -11,22 +11,24 @@ app.use(bodyParser.json());
 const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const LINE_NOTIFY_TOKEN = process.env.LINE_NOTIFY_TOKEN;
-const adminUserId = "Ufbbd2498b46be383f9e7df428b5682dd";
+const adminUserId = "U7411fd19912bc8f916d32106bc5940a3";
 
-const statusFile = "status.json";
 let manualMode = false;
-if (fs.existsSync(statusFile)) {
+const MANUAL_FILE = "manual_mode.json";
+
+// 檢查並載入手動模式
+if (fs.existsSync(MANUAL_FILE)) {
   try {
-    const saved = JSON.parse(fs.readFileSync(statusFile));
-    manualMode = saved.manualMode || false;
-  } catch {
-    manualMode = false;
+    const data = JSON.parse(fs.readFileSync(MANUAL_FILE));
+    manualMode = data.manualMode;
+  } catch (e) {
+    console.log("🔧 無法讀取 manual_mode.json，預設為 false");
   }
 }
-const saveManualMode = (value) => {
-  manualMode = value;
-  fs.writeFileSync(statusFile, JSON.stringify({ manualMode }));
-};
+
+function saveManualMode(value) {
+  fs.writeFileSync(MANUAL_FILE, JSON.stringify({ manualMode: value }));
+}
 
 const faqReplies = {
   "電話": "我們的電話是：0937-092-518",
@@ -38,10 +40,6 @@ const faqReplies = {
 
 const sensitiveKeywords = ["幹", "媽的", "靠北", "他媽", "死"];
 
-const logUserId = (event) => {
-  console.log("User ID:", event.source.userId);
-};
-
 app.post("/webhook", async (req, res) => {
   res.status(200).send("OK");
   const events = req.body.events;
@@ -50,135 +48,36 @@ app.post("/webhook", async (req, res) => {
       const userId = event.source.userId;
       const message = event.message.text;
 
-      logUserId(event);
-
-      if (message === "切換客服模式") {
-        await replyFlex(event.replyToken, {
-          type: "flex",
-          altText: "請選擇客服模式",
-          contents: {
-            type: "bubble",
-            body: {
-              type: "box",
-              layout: "vertical",
-              contents: [
-                { type: "text", text: "請選擇回覆模式：", weight: "bold", size: "md" },
-                {
-                  type: "button",
-                  action: { type: "message", label: "🤖 AI 客服", text: "我要使用 AI 客服" },
-                  style: "primary",
-                  color: "#10B981"
-                },
-                {
-                  type: "button",
-                  action: { type: "message", label: "🧑‍💼 真人客服", text: "我要改由真人客服" },
-                  style: "secondary"
-                }
-              ]
-            }
-          }
-        });
-        return;
+      // 控制模式（選單）
+      if (message === "切換客服模式" && userId === adminUserId) {
+        return sendCustomerModeSelector(event.replyToken);
       }
 
+      // 控制模式（指令）
       if (userId === adminUserId) {
-        if (message === "我要使用 AI 客服") {
-          saveManualMode(false);
-          await replyText(event.replyToken, "🤖 已切換為 AI 客服模式，開始為您服務！");
-          return;
-        } else if (message === "我要改由真人客服") {
+        if (message === "/manual on") {
+          manualMode = true;
           saveManualMode(true);
-          await replyText(event.replyToken, "✅ 已切換為真人客服模式，AI 將暫停回覆。");
-          return;
+          return replyText(event.replyToken, "✅ 已切換至 *手動回覆模式*，Bot 暫停回覆。");
+        } else if (message === "/manual off") {
+          manualMode = false;
+          saveManualMode(false);
+          return replyText(event.replyToken, "🤖 已切換至 *自動回覆模式*，Bot 開始工作囉！");
         }
       }
 
       if (manualMode && userId !== adminUserId) return;
 
+      // 不當字詞過濾
       if (sensitiveKeywords.some(word => message.includes(word))) {
-        await replyText(event.replyToken, "⚠️ 為維護良好對話品質，請勿使用不當字詞喔。");
-        return;
+        return replyText(event.replyToken, "⚠️ 為維護良好對話品質，請勿使用不當字詞喔。")
       }
 
-      const faqKey = Object.keys(faqReplies).find(key => message.includes(key));
-      if (faqKey) {
-        await replyText(event.replyToken, faqReplies[faqKey]);
-        return;
-      }
+      // FAQ
+      const faqKey = Object.keys(faqReplies).find(k => message.includes(k));
+      if (faqKey) return replyText(event.replyToken, faqReplies[faqKey]);
 
-      if (!fs.existsSync("userdata.json")) fs.writeFileSync("userdata.json", JSON.stringify({}));
-      let userdata = JSON.parse(fs.readFileSync("userdata.json"));
-      if (!userdata[userId]) {
-        userdata[userId] = { step: 1 };
-        fs.writeFileSync("userdata.json", JSON.stringify(userdata));
-        await replyText(event.replyToken, "👋 歡迎洽詢報價！請問您的公司名稱是？");
-        return;
-      } else {
-        const current = userdata[userId];
-        if (current.step === 1) {
-          current.company = message;
-          current.step = 2;
-          fs.writeFileSync("userdata.json", JSON.stringify(userdata));
-          await replyText(event.replyToken, "請問您的產業類型是？");
-          return;
-        } else if (current.step === 2) {
-          current.industry = message;
-          current.step = 3;
-          fs.writeFileSync("userdata.json", JSON.stringify(userdata));
-          await replyText(event.replyToken, "請問您的主要需求是？");
-          return;
-        } else if (current.step === 3) {
-          current.need = message;
-          current.step = 4;
-          fs.writeFileSync("userdata.json", JSON.stringify(userdata));
-
-          await axios.post("https://notify-api.line.me/api/notify",
-            new URLSearchParams({
-              message: `🔔 有新客戶填寫報價：\n公司：${current.company}\n產業：${current.industry}\n需求：${current.need}`
-            }), {
-              headers: {
-                Authorization: `Bearer ${LINE_NOTIFY_TOKEN}`,
-                "Content-Type": "application/x-www-form-urlencoded"
-              }
-            }
-          );
-
-          await replyFlex(event.replyToken, {
-            type: "flex",
-            altText: "請選擇聯絡方式",
-            contents: {
-              type: "bubble",
-              body: {
-                type: "box",
-                layout: "vertical",
-                spacing: "md",
-                contents: [
-                  {
-                    type: "text",
-                    text: "📅 我們可以為您安排與顧問進一步討論～\n請問您希望的聯繫方式是？",
-                    wrap: true,
-                    weight: "bold",
-                    size: "md"
-                  },
-                  {
-                    type: "box",
-                    layout: "vertical",
-                    spacing: "sm",
-                    contents: [
-                      { type: "button", style: "primary", color: "#6366F1", action: { type: "message", label: "1️⃣ LINE", text: "我要用 LINE 聯絡" } },
-                      { type: "button", style: "primary", color: "#6366F1", action: { type: "message", label: "2️⃣ 電話", text: "我要電話聯絡" } },
-                      { type: "button", style: "primary", color: "#6366F1", action: { type: "message", label: "3️⃣ Email", text: "我要用 Email 聯絡" } },
-                      { type: "button", style: "secondary", action: { type: "message", label: "4️⃣ 不用聯繫，我先看看就好", text: "我先看看就好" } }
-                    ]
-                  }
-                ]
-              }
-            }
-          });
-          return;
-        }
-      }
-
+      // GPT
       try {
         const gptRes = await axios.post("https://api.openai.com/v1/chat/completions", {
           model: "gpt-3.5-turbo",
@@ -193,8 +92,8 @@ app.post("/webhook", async (req, res) => {
           }
         });
 
-        const replyContent = gptRes.data.choices[0].message.content;
-        await replyText(event.replyToken, replyContent);
+        const reply = gptRes.data.choices[0].message.content;
+        await replyText(event.replyToken, reply);
       } catch (err) {
         console.error("GPT error:", err.response?.data || err.message);
         await replyText(event.replyToken, "目前服務繁忙，請稍後再試～");
@@ -215,8 +114,24 @@ function replyText(token, text) {
   });
 }
 
-function replyFlex(token, flex) {
-  return axios.post("https://api.line.me/v2/bot/message/reply", flex, {
+function sendCustomerModeSelector(token) {
+  return axios.post("https://api.line.me/v2/bot/message/reply", {
+    replyToken: token,
+    messages: [
+      {
+        type: "template",
+        altText: "請選擇客服模式",
+        template: {
+          type: "buttons",
+          text: "請選擇目前要啟用的客服模式 👇",
+          actions: [
+            { type: "message", label: "🤖 AI 回覆模式", text: "/manual off" },
+            { type: "message", label: "👩‍💼 真人客服模式", text: "/manual on" }
+          ]
+        }
+      }
+    ]
+  }, {
     headers: {
       Authorization: `Bearer ${LINE_ACCESS_TOKEN}`,
       "Content-Type": "application/json"

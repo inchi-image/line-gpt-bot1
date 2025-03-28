@@ -1,3 +1,4 @@
+
 // index.js
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -33,39 +34,36 @@ app.post("/webhook", async (req, res) => {
     const userId = event.source.userId;
     const msg = event.message.text;
 
-    // 顯示使用者 ID
     if (msg === "/me") {
       await replyText(event.replyToken, `你的使用者 ID 是：\n${userId}`);
       return;
     }
 
-    // 切換客服模式後續
     if (msg === "AI回覆") {
-      convo.setMode(userId, "AI");
+      convo.setModeWithExpire(userId, "AI", 0);
       await replyText(event.replyToken, "✅ 已切換為 AI 回覆模式。");
       return;
     }
+
     if (msg === "真人客服") {
-      convo.setMode(userId, "human");
-      setTimeout(() => convo.setMode(userId, "AI"), 3600000); // 一小時後重設為 AI
+      convo.setModeWithExpire(userId, "human", 3600000);
       await replyText(event.replyToken, "🧑‍💼 已切換為真人客服接手，我們會盡快與您聯繫。AI 回覆將暫停一小時。");
       return;
     }
 
-    // 禁止詞檢查
     if (sensitiveKeywords.some(word => msg.includes(word))) {
       await replyText(event.replyToken, "⚠️ 為維護良好對話品質，請勿使用不當字詞喔。");
       return;
     }
 
-    // FAQ 回覆
     const faqKey = Object.keys(faqReplies).find(k => msg.includes(k));
     if (faqKey) {
       await replyText(event.replyToken, faqReplies[faqKey]);
       return;
     }
 
-    // 導引流程
+    if (convo.getEffectiveMode(userId) === "human") return;
+
     const step = convo.getUserStep(userId);
 
     if (step === 0) {
@@ -111,17 +109,12 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    // 若中途切為真人客服，暫停 AI 回覆
-    if (convo.getMode(userId) === "human") return;
-
-    // 啟動導引
     if (step === -1 || step >= 100) {
       convo.updateUserStep(userId, "company", "", 0);
       await replyText(event.replyToken, "👋 歡迎洽詢報價！請問您的公司名稱是？");
       return;
     }
 
-    // 其他問題進 GPT 回答
     try {
       const res = await axios.post("https://api.openai.com/v1/chat/completions", {
         model: "gpt-3.5-turbo",

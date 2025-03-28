@@ -114,7 +114,7 @@ app.post("/webhook", async (req, res) => {
       const gpt = await axios.post("https://api.openai.com/v1/chat/completions", {
         model: "gpt-3.5-turbo",
         messages: [
-          { role: "system", content: "你是映啟影音行銷的智能客服，專門協助品牌規劃短影音、IP打造與廣告拍攝。請用簡潔明確的方式解答客戶問題，若提問與影音策略、預算、報價等有關，可針對客戶情境建議方向，但務必在最後提醒「可安排顧問一對一討論更合適方案」。" },
+          { role: "system", content: "你是映啟影音行銷的智能客服，專門協助品牌規劃短影音、IP打造與廣告拍攝。請用簡潔明確的方式解答客戶問題，若提問與影音策略、預算、報價等有關，可針對客戶情境建議方向，但務必在最後提醒『可安排顧問一對一討論更合適方案』。" },
           { role: "user", content: msg }
         ]
       }, {
@@ -156,7 +156,7 @@ function replyFlex(token, flex) {
 
 function contactMethodFlex() {
   return {
-    replyToken: null, // 將由 replyFlex 注入
+    replyToken: null,
     messages: [
       {
         type: "flex",

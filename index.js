@@ -14,6 +14,7 @@ const LINE_NOTIFY_TOKEN = process.env.LINE_NOTIFY_TOKEN;
 const adminUserId = "Ufbbd2498b46be383f9e7df428b5682dd";
 const MODE_FILE = "mode.json";
 
+// 永久儲存客服模式狀態
 function getManualMode() {
   if (!fs.existsSync(MODE_FILE)) return false;
   const data = JSON.parse(fs.readFileSync(MODE_FILE));
@@ -34,6 +35,12 @@ const faqReplies = {
 const sensitiveKeywords = ["幹", "媽的", "靠北", "他媽", "死"];
 
 app.post("/webhook", async (req, res) => {
+  // 🔍 檢查是否在手動聊天模式（LINE 官方觸發）
+  if (req.body.mode === "standby") {
+    console.log("🧑‍💼 目前是手動聊天模式，Bot 靜音中...");
+    return res.status(200).send("Manual chat mode active");
+  }
+
   res.status(200).send("OK");
   const events = req.body.events;
 
@@ -42,19 +49,15 @@ app.post("/webhook", async (req, res) => {
     const userId = event.source.userId;
     const msg = event.message.text;
 
-    // /me 指令印出 User ID
-    if (msg === "/me") {
-      await replyText(event.replyToken, `🆔 您的 User ID 是：\n${userId}`);
-      return;
-    }
+    console.log("🔥 使用者 ID：", userId);
 
-    // 管理員叫出客服模式選單
+    // 管理員傳送『切換客服模式』 → 彈出按鈕樣板
     if (userId === adminUserId && msg === "切換客服模式") {
       await sendCustomerModeMenu(event.replyToken);
       return;
     }
 
-    // 管理員切換客服模式
+    // 使用者點選按鈕切換客服模式
     if (userId === adminUserId && msg === "🤖 AI 回覆模式") {
       setManualMode(false);
       await replyText(event.replyToken, "🤖 已切換為 AI 自動回覆模式！");
@@ -79,6 +82,12 @@ app.post("/webhook", async (req, res) => {
     const faqKey = Object.keys(faqReplies).find(key => msg.toLowerCase().includes(key));
     if (faqKey) {
       await replyText(event.replyToken, faqReplies[faqKey]);
+      return;
+    }
+
+    // 查詢自己的 userId
+    if (msg === "/me") {
+      await replyText(event.replyToken, `你的使用者 ID 是：\n${userId}`);
       return;
     }
 
@@ -236,5 +245,5 @@ function saveUserData(data) {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`\u{1F680} LINE GPT Bot 正在監聽 port ${PORT} 🚀`);
+  console.log(`🚀 LINE GPT Bot 正在監聽 port ${PORT} 🚀`);
 });

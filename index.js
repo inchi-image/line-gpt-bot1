@@ -10,7 +10,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const LINE_NOTIFY_TOKEN = process.env.LINE_NOTIFY_TOKEN;
 
 let manualMode = false; // true 表示手動回覆中
-const adminUserId = "請在這裡填入你的 LINE 使用者 ID";
+const adminUserId = "U7411fd19912bc8f916d32106bc5940a3";
 
 const forbiddenKeywords = ["幹", "三小", "你媽", "操", "智障"];
 const userStates = {};

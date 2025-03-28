@@ -1,54 +1,50 @@
+// 👇 新增在 advanced-convo-engine.js 內
 const fs = require("fs");
-const FILE = "userdata.json";
-
-const STEP = {
-  COMPANY: 1,
-  INDUSTRY: 2,
-  NEED: 3,
-  BUDGET: 4,
-  TIME: 5,
-  CONTACT: 6,
-  MODE: 7,
-  DONE: 8
-};
+const path = "userdata.json";
 
 function load() {
-  if (!fs.existsSync(FILE)) fs.writeFileSync(FILE, JSON.stringify({}));
-  return JSON.parse(fs.readFileSync(FILE));
+  if (!fs.existsSync(path)) fs.writeFileSync(path, JSON.stringify({}));
+  return JSON.parse(fs.readFileSync(path));
 }
 
 function save(data) {
-  fs.writeFileSync(FILE, JSON.stringify(data));
-}
-
-function getUserStep(userId) {
-  const data = load();
-  return data[userId]?.step || STEP.COMPANY;
-}
-
-function updateUserStep(userId, key, value, nextStep) {
-  const data = load();
-  if (!data[userId]) data[userId] = { step: STEP.COMPANY };
-  data[userId][key] = value;
-  data[userId].step = nextStep;
-  save(data);
+  fs.writeFileSync(path, JSON.stringify(data));
 }
 
 function getUserAll(userId) {
-  const data = load();
-  return data[userId] || {};
+  const d = load();
+  return d[userId] || {};
 }
 
-function resetUser(userId) {
-  const data = load();
-  delete data[userId];
-  save(data);
+function getUserStep(userId) {
+  const d = load();
+  return d[userId]?.step ?? -1;
+}
+
+function updateUserStep(userId, field, value, nextStep) {
+  const d = load();
+  if (!d[userId]) d[userId] = {};
+  d[userId][field] = value;
+  d[userId].step = nextStep;
+  save(d);
+}
+
+function setMode(userId, mode) {
+  const d = load();
+  if (!d[userId]) d[userId] = {};
+  d[userId].mode = mode;
+  save(d);
+}
+
+function getMode(userId) {
+  const d = load();
+  return d[userId]?.mode || "AI";
 }
 
 module.exports = {
-  STEP,
+  getUserAll,
   getUserStep,
   updateUserStep,
-  getUserAll,
-  resetUser
+  setMode,
+  getMode
 };

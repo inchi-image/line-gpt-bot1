@@ -11,9 +11,10 @@ app.use(bodyParser.json());
 const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const LINE_NOTIFY_TOKEN = process.env.LINE_NOTIFY_TOKEN;
-const adminUserId = "U7411fd19912bc8f916d32106bc5940a3";
+const adminUserId = "U7411fd19912bc8f916d32106bc5940a3"; // 改成你的 LINE 使用者 ID
 const MODE_FILE = "mode.json";
 
+// 永久儲存客服模式狀態
 function getManualMode() {
   if (!fs.existsSync(MODE_FILE)) return false;
   const data = JSON.parse(fs.readFileSync(MODE_FILE));
@@ -36,17 +37,27 @@ const sensitiveKeywords = ["幹", "媽的", "靠北", "他媽", "死"];
 app.post("/webhook", async (req, res) => {
   res.status(200).send("OK");
   const events = req.body.events;
-  for (let event of events) {
-    console.log("🔥 使用者 ID：", event.source.userId);
-    if (event.type !== "message" || event.message.type !== "text") return;
 
+  for (let event of events) {
+    if (event.type !== "message" || event.message.type !== "text") return;
     const userId = event.source.userId;
     const msg = event.message.text;
 
+    console.log("🔥 使用者 ID：", userId);
+
+    // /me 指令回傳 userId
+    if (msg === "/me") {
+      await replyText(event.replyToken, `你的使用者 ID 是：${userId}`);
+      return;
+    }
+
+    // 管理員傳送『切換客服模式』 → 彈出按鈕樣板
     if (userId === adminUserId && msg === "切換客服模式") {
       await sendCustomerModeMenu(event.replyToken);
       return;
     }
+
+    // 使用者點選按鈕切換客服模式
     if (userId === adminUserId && msg === "🤖 AI 回覆模式") {
       setManualMode(false);
       await replyText(event.replyToken, "🤖 已切換為 AI 自動回覆模式！");
@@ -58,19 +69,23 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
+    // 若為手動客服模式，非管理員就不回覆
     if (getManualMode() && userId !== adminUserId) return;
 
+    // 禁止字詞
     if (sensitiveKeywords.some(word => msg.includes(word))) {
       await replyText(event.replyToken, "⚠️ 為維護良好對話品質，請勿使用不當字詞喔。");
       return;
     }
 
+    // FAQ
     const faqKey = Object.keys(faqReplies).find(key => msg.toLowerCase().includes(key));
     if (faqKey) {
       await replyText(event.replyToken, faqReplies[faqKey]);
       return;
     }
 
+    // 引導報價流程
     const userdata = loadUserData();
     if (!userdata[userId]) {
       userdata[userId] = { step: 1 };
@@ -112,6 +127,7 @@ app.post("/webhook", async (req, res) => {
       }
     }
 
+    // GPT 回覆
     try {
       const response = await axios.post("https://api.openai.com/v1/chat/completions", {
         model: "gpt-3.5-turbo",

@@ -7,55 +7,102 @@ app.use(bodyParser.json());
 
 const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const LINE_NOTIFY_TOKEN = process.env.LINE_NOTIFY_TOKEN;
 
-// ✅ 預先回 200，避免 webhook timeout（防封鎖關鍵）
-app.post("/webhook", (req, res) => {
+let manualMode = false; // true 表示手動回覆中
+const adminUserId = "請在這裡填入你的 LINE 使用者 ID";
+
+const forbiddenKeywords = ["幹", "三小", "你媽", "操", "智障"];
+const userStates = {};
+
+app.post("/webhook", async (req, res) => {
   res.status(200).send("OK");
 
   const events = req.body.events;
-  events.forEach((event) => {
+  for (let event of events) {
     if (event.type === "message" && event.message.type === "text") {
-      handleMessage(event);
-    }
-  });
-});
+      const userId = event.source.userId;
+      const userText = event.message.text.trim();
+      console.log("👤 使用者 ID:", userId);
 
-// ✅ 將 GPT 處理拉出來獨立 async function
-async function handleMessage(event) {
-  const userText = event.message.text;
+      if (forbiddenKeywords.some(word => userText.includes(word))) {
+        await reply(event.replyToken, "⚠️ 為維護良好對話品質，請避免使用不當字詞唷。");
+        continue;
+      }
 
-  try {
-    // GPT prompt 設定（真人客服風格）
-    const gptResponse = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-3.5-turbo",
-        max_tokens: 300, // 防暴衝過多 token
-        messages: [
-          {
-            role: "system",
-            content:
-              "你是短影音公司的熱情客服專員，口吻自然親切、具專業度。請根據客戶輸入的問題，簡單說明服務內容，並主動邀約預約免費諮詢。請用繁體中文回答，並保持有禮貌像真人客服。"
-          },
-          { role: "user", content: userText }
-        ]
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json"
+      if (userId === adminUserId) {
+        if (userText === "/manual on") {
+          manualMode = true;
+          await reply(event.replyToken, "✅ 手動模式已開啟，Bot 暫停自動回覆。");
+          continue;
+        }
+        if (userText === "/manual off") {
+          manualMode = false;
+          await reply(event.replyToken, "✅ 手動模式已關閉，Bot 恢復自動回覆。");
+          continue;
         }
       }
-    );
 
-    const replyText = gptResponse.data.choices[0].message.content.trim();
+      if (["/manual on", "/manual off"].includes(userText) && userId !== adminUserId) {
+        await reply(event.replyToken, "⚠️ 此指令僅限客服人員使用。請留言我們會儘快回覆您！");
+        continue;
+      }
 
-    // 回傳訊息給 LINE 使用者
+      if (manualMode) {
+        await reply(event.replyToken, "👩‍💼 目前由專人協助中，請稍候喔～");
+        continue;
+      }
+
+      if (["聯絡方式", "電話", "email", "聯繫"].some(k => userText.includes(k))) {
+        await reply(event.replyToken, `📞 聯絡方式如下：\n電話：0937-092-518\nEmail：inchi.image@gmail.com\n營業時間：週一至週五 10:00-18:30\n地址：新北市板橋區光復街203號`);
+        continue;
+      }
+
+      if (!userStates[userId]) {
+        userStates[userId] = { step: 1, data: {} };
+        await reply(event.replyToken, "👋 歡迎洽詢報價！請問您的公司名稱是？");
+        continue;
+      }
+
+      const state = userStates[userId];
+      if (state.step === 1) {
+        state.data.company = userText;
+        state.step++;
+        await reply(event.replyToken, "您主要的產業或服務是？");
+      } else if (state.step === 2) {
+        state.data.industry = userText;
+        state.step++;
+        await reply(event.replyToken, "請簡述您希望我們協助的需求或內容 🙋‍♀️");
+      } else if (state.step === 3) {
+        state.data.need = userText;
+        state.step++;
+        await reply(event.replyToken, "📅 我們可以為您安排與顧問進一步討論～請問您希望的聯繫方式是？\n1️⃣ LINE\n2️⃣ 電話\n3️⃣ Email\n4️⃣ 不用聯繫，我先看看就好");
+      } else if (state.step === 4) {
+        state.data.contactMethod = userText;
+        await reply(event.replyToken, "✅ 感謝填寫，我們會盡快與您聯繫！若您還有其他問題，歡迎隨時留言～");
+
+        await axios.post("https://notify-api.line.me/api/notify", new URLSearchParams({
+          message: `📬 新報價表單來囉！\n公司：${state.data.company}\n產業：${state.data.industry}\n需求：${state.data.need}\n聯繫方式：${state.data.contactMethod}`
+        }), {
+          headers: {
+            Authorization: `Bearer ${LINE_NOTIFY_TOKEN}`,
+            "Content-Type": "application/x-www-form-urlencoded"
+          }
+        });
+
+        delete userStates[userId];
+      }
+    }
+  }
+});
+
+async function reply(replyToken, text) {
+  try {
     await axios.post(
       "https://api.line.me/v2/bot/message/reply",
       {
-        replyToken: event.replyToken,
-        messages: [{ type: "text", text: replyText }]
+        replyToken,
+        messages: [{ type: "text", text }]
       },
       {
         headers: {
@@ -65,11 +112,11 @@ async function handleMessage(event) {
       }
     );
   } catch (err) {
-    console.error("❌ GPT or LINE 回覆錯誤：", err.response?.data || err.message);
+    console.error("❌ LINE 回覆錯誤：", err.response?.data || err.message);
   }
 }
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🌈 LINE GPT Bot 正在監聽 port ${PORT} 🚀`);
+  console.log(`🚀 LINE GPT Bot 正在監聽 port ${PORT} 🚀`);
 });

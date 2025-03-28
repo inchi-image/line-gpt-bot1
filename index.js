@@ -11,7 +11,7 @@ app.use(bodyParser.json());
 const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const LINE_NOTIFY_TOKEN = process.env.LINE_NOTIFY_TOKEN;
-const adminUserId = "U7411fd19912bc8f916d32106bc5940a3";
+const adminUserId = "Ufbbd2498b46be383f9e7df428b5682dd";
 
 const statusFile = "status.json";
 let manualMode = false;

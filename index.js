@@ -14,7 +14,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const LINE_NOTIFY_TOKEN = process.env.LINE_NOTIFY_TOKEN;
 const adminUserId = process.env.ADMIN_USER_ID;
 
-// FAQ 快速回覆
 const faqReplies = {
   "電話": "我們的電話是：0937-092-518",
   "聯絡方式": "電話：0937-092-518\nEmail：inchi.image@gmail.com",
@@ -23,7 +22,6 @@ const faqReplies = {
   "地址": "我們地址是新北市板橋區光復街203號"
 };
 
-// 禁止詞
 const sensitiveKeywords = ["幹", "媽的", "靠北", "他媽", "死"];
 
 app.post("/webhook", async (req, res) => {
@@ -35,23 +33,39 @@ app.post("/webhook", async (req, res) => {
     const userId = event.source.userId;
     const msg = event.message.text;
 
+    // 顯示使用者 ID
     if (msg === "/me") {
       await replyText(event.replyToken, `你的使用者 ID 是：\n${userId}`);
       return;
     }
 
-    if (sensitiveKeywords.some(w => msg.includes(w))) {
+    // 切換客服模式後續
+    if (msg === "AI回覆") {
+      convo.setMode(userId, "AI");
+      await replyText(event.replyToken, "✅ 已切換為 AI 回覆模式。");
+      return;
+    }
+    if (msg === "真人客服") {
+      convo.setMode(userId, "human");
+      setTimeout(() => convo.setMode(userId, "AI"), 3600000); // 一小時後重設為 AI
+      await replyText(event.replyToken, "🧑‍💼 已切換為真人客服接手，我們會盡快與您聯繫。AI 回覆將暫停一小時。");
+      return;
+    }
+
+    // 禁止詞檢查
+    if (sensitiveKeywords.some(word => msg.includes(word))) {
       await replyText(event.replyToken, "⚠️ 為維護良好對話品質，請勿使用不當字詞喔。");
       return;
     }
 
-    const matchedFAQ = Object.keys(faqReplies).find(k => msg.includes(k));
-    if (matchedFAQ) {
-      await replyText(event.replyToken, faqReplies[matchedFAQ]);
+    // FAQ 回覆
+    const faqKey = Object.keys(faqReplies).find(k => msg.includes(k));
+    if (faqKey) {
+      await replyText(event.replyToken, faqReplies[faqKey]);
       return;
     }
 
-    const user = convo.getUserAll(userId);
+    // 導引流程
     const step = convo.getUserStep(userId);
 
     if (step === 0) {
@@ -76,7 +90,7 @@ app.post("/webhook", async (req, res) => {
     }
     if (step === 4) {
       convo.updateUserStep(userId, "time", msg, 5);
-      await replyFlex(event.replyToken, contactMethodFlex(event.replyToken));
+      await replyFlex(event.replyToken, contactMethodFlex());
       return;
     }
     if (step === 5) {
@@ -84,7 +98,7 @@ app.post("/webhook", async (req, res) => {
       const u = convo.getUserAll(userId);
       await axios.post("https://notify-api.line.me/api/notify",
         new URLSearchParams({
-          message: `\u{1F4E9} 有新客戶填寫完整資料：\n公司：${u.company}\n產業：${u.industry}\n需求：${u.need}\n預算：${u.budget}\n時間：${u.time}\n聯絡方式：${u.contact}`
+          message: `📩 有新客戶填寫完整資料：\n公司：${u.company}\n產業：${u.industry}\n需求：${u.need}\n預算：${u.budget}\n時間：${u.time}\n聯絡方式：${u.contact}`
         }), {
           headers: {
             Authorization: `Bearer ${LINE_NOTIFY_TOKEN}`,
@@ -92,23 +106,27 @@ app.post("/webhook", async (req, res) => {
           }
         }
       );
-
-      await replyFlex(event.replyToken, aiOrHumanChoice(event.replyToken));
+      await replyFlex(event.replyToken, aiOrHumanChoice());
       convo.updateUserStep(userId, "final", "sent", 100);
       return;
     }
 
+    // 若中途切為真人客服，暫停 AI 回覆
+    if (convo.getMode(userId) === "human") return;
+
+    // 啟動導引
     if (step === -1 || step >= 100) {
       convo.updateUserStep(userId, "company", "", 0);
-      await replyText(event.replyToken, "\u{1F44B} 歡迎洽詢報價！請問您的公司名稱是？");
+      await replyText(event.replyToken, "👋 歡迎洽詢報價！請問您的公司名稱是？");
       return;
     }
 
+    // 其他問題進 GPT 回答
     try {
-      const gpt = await axios.post("https://api.openai.com/v1/chat/completions", {
+      const res = await axios.post("https://api.openai.com/v1/chat/completions", {
         model: "gpt-3.5-turbo",
         messages: [
-          { role: "system", content: "你是映啟影音行銷的智能客服，專門協助品牌規劃短影音、IP打造與廣告拍攝。請用簡潔明確的方式解答客戶問題，若提問與影音策略、預算、報價等有關，可針對客戶情境建議方向，但務必在最後提醒『可安排顧問一對一討論更合適方案』。" },
+          { role: "system", content: "你是映啟影音行銷的智能客服，請用簡潔明確方式解答短影音與報價問題，並提醒可安排顧問一對一討論。" },
           { role: "user", content: msg }
         ]
       }, {
@@ -118,11 +136,10 @@ app.post("/webhook", async (req, res) => {
         }
       });
 
-      const reply = gpt.data.choices[0].message.content;
+      const reply = res.data.choices[0].message.content;
       await replyText(event.replyToken, reply);
-    } catch (err) {
-      console.error("GPT 回覆錯誤：", err.response?.data || err.message);
-      await replyText(event.replyToken, "目前客服忙碌中，稍後再試～");
+    } catch (e) {
+      await replyText(event.replyToken, "目前客服繁忙，請稍後再試～");
     }
   }
 });
@@ -140,7 +157,6 @@ function replyText(token, text) {
 }
 
 function replyFlex(token, flex) {
-  flex.replyToken = token;
   return axios.post("https://api.line.me/v2/bot/message/reply", flex, {
     headers: {
       Authorization: `Bearer ${LINE_ACCESS_TOKEN}`,
@@ -149,9 +165,9 @@ function replyFlex(token, flex) {
   });
 }
 
-function contactMethodFlex(token) {
+function contactMethodFlex() {
   return {
-    replyToken: token,
+    replyToken: null,
     messages: [
       {
         type: "flex",
@@ -163,7 +179,7 @@ function contactMethodFlex(token) {
             layout: "vertical",
             spacing: "md",
             contents: [
-              { type: "text", text: "\u{1F4DE} 請選擇聯絡方式：", weight: "bold", wrap: true },
+              { type: "text", text: "📞 請選擇聯絡方式：", weight: "bold", wrap: true },
               {
                 type: "box",
                 layout: "vertical",
@@ -182,9 +198,9 @@ function contactMethodFlex(token) {
   };
 }
 
-function aiOrHumanChoice(token) {
+function aiOrHumanChoice() {
   return {
-    replyToken: token,
+    replyToken: null,
     messages: [
       {
         type: "template",
@@ -204,5 +220,5 @@ function aiOrHumanChoice(token) {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`\u{1F680} LINE GPT Bot 正在監聽 port ${PORT} \u{1F680}`);
+  console.log(`🚀 LINE GPT Bot 正在監聽 port ${PORT} 🚀`);
 });

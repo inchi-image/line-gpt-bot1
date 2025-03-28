@@ -13,7 +13,20 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const LINE_NOTIFY_TOKEN = process.env.LINE_NOTIFY_TOKEN;
 const adminUserId = "U7411fd19912bc8f916d32106bc5940a3";
 
+const statusFile = "status.json";
 let manualMode = false;
+if (fs.existsSync(statusFile)) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(statusFile));
+    manualMode = saved.manualMode || false;
+  } catch {
+    manualMode = false;
+  }
+}
+const saveManualMode = (value) => {
+  manualMode = value;
+  fs.writeFileSync(statusFile, JSON.stringify({ manualMode }));
+};
 
 const faqReplies = {
   "電話": "我們的電話是：0937-092-518",
@@ -37,38 +50,62 @@ app.post("/webhook", async (req, res) => {
       const userId = event.source.userId;
       const message = event.message.text;
 
-      logUserId(event); // 方便你抓其他使用者 ID
+      logUserId(event);
 
-      // 控制客服模式開關
+      if (message === "切換客服模式") {
+        await replyFlex(event.replyToken, {
+          type: "flex",
+          altText: "請選擇客服模式",
+          contents: {
+            type: "bubble",
+            body: {
+              type: "box",
+              layout: "vertical",
+              contents: [
+                { type: "text", text: "請選擇回覆模式：", weight: "bold", size: "md" },
+                {
+                  type: "button",
+                  action: { type: "message", label: "🤖 AI 客服", text: "我要使用 AI 客服" },
+                  style: "primary",
+                  color: "#10B981"
+                },
+                {
+                  type: "button",
+                  action: { type: "message", label: "🧑‍💼 真人客服", text: "我要改由真人客服" },
+                  style: "secondary"
+                }
+              ]
+            }
+          }
+        });
+        return;
+      }
+
       if (userId === adminUserId) {
-        if (message === "/manual on") {
-          manualMode = true;
-          await replyText(event.replyToken, "✅ 已切換至 *手動回覆模式*，Bot 暫停回覆。");
+        if (message === "我要使用 AI 客服") {
+          saveManualMode(false);
+          await replyText(event.replyToken, "🤖 已切換為 AI 客服模式，開始為您服務！");
           return;
-        } else if (message === "/manual off") {
-          manualMode = false;
-          await replyText(event.replyToken, "🤖 已切換至 *自動回覆模式*，Bot 開始工作囉！");
+        } else if (message === "我要改由真人客服") {
+          saveManualMode(true);
+          await replyText(event.replyToken, "✅ 已切換為真人客服模式，AI 將暫停回覆。");
           return;
         }
       }
 
-      // 如果手動模式開啟，非管理員就不回覆
       if (manualMode && userId !== adminUserId) return;
 
-      // 關鍵字限制過濾
       if (sensitiveKeywords.some(word => message.includes(word))) {
         await replyText(event.replyToken, "⚠️ 為維護良好對話品質，請勿使用不當字詞喔。");
         return;
       }
 
-      // 常見問答回覆
       const faqKey = Object.keys(faqReplies).find(key => message.includes(key));
       if (faqKey) {
         await replyText(event.replyToken, faqReplies[faqKey]);
         return;
       }
 
-      // 自動引導報價表對話邏輯
       if (!fs.existsSync("userdata.json")) fs.writeFileSync("userdata.json", JSON.stringify({}));
       let userdata = JSON.parse(fs.readFileSync("userdata.json"));
       if (!userdata[userId]) {
@@ -95,7 +132,6 @@ app.post("/webhook", async (req, res) => {
           current.step = 4;
           fs.writeFileSync("userdata.json", JSON.stringify(userdata));
 
-          // ✅ 傳送 LINE Notify 給管理員
           await axios.post("https://notify-api.line.me/api/notify",
             new URLSearchParams({
               message: `🔔 有新客戶填寫報價：\n公司：${current.company}\n產業：${current.industry}\n需求：${current.need}`
@@ -107,7 +143,6 @@ app.post("/webhook", async (req, res) => {
             }
           );
 
-          // 最後一題：選擇聯絡方式
           await replyFlex(event.replyToken, {
             type: "flex",
             altText: "請選擇聯絡方式",
@@ -144,7 +179,6 @@ app.post("/webhook", async (req, res) => {
         }
       }
 
-      // 若沒有進入特殊條件，則進行 GPT 回覆
       try {
         const gptRes = await axios.post("https://api.openai.com/v1/chat/completions", {
           model: "gpt-3.5-turbo",
@@ -159,8 +193,8 @@ app.post("/webhook", async (req, res) => {
           }
         });
 
-        const replyText = gptRes.data.choices[0].message.content;
-        await replyText(event.replyToken, replyText);
+        const replyContent = gptRes.data.choices[0].message.content;
+        await replyText(event.replyToken, replyContent);
       } catch (err) {
         console.error("GPT error:", err.response?.data || err.message);
         await replyText(event.replyToken, "目前服務繁忙，請稍後再試～");

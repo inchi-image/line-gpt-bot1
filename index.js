@@ -35,26 +35,22 @@ app.post("/webhook", async (req, res) => {
     const userId = event.source.userId;
     const msg = event.message.text;
 
-    // 顯示使用者 ID 指令
     if (msg === "/me") {
       await replyText(event.replyToken, `你的使用者 ID 是：\n${userId}`);
       return;
     }
 
-    // 禁止字詞處理
     if (sensitiveKeywords.some(w => msg.includes(w))) {
       await replyText(event.replyToken, "⚠️ 為維護良好對話品質，請勿使用不當字詞喔。");
       return;
     }
 
-    // FAQ 關鍵字回覆
     const matchedFAQ = Object.keys(faqReplies).find(k => msg.includes(k));
     if (matchedFAQ) {
       await replyText(event.replyToken, faqReplies[matchedFAQ]);
       return;
     }
 
-    // 客製化導引流程邏輯
     const user = convo.getUserAll(userId);
     const step = convo.getUserStep(userId);
 
@@ -80,7 +76,7 @@ app.post("/webhook", async (req, res) => {
     }
     if (step === 4) {
       convo.updateUserStep(userId, "time", msg, 5);
-      await replyFlex(event.replyToken, contactMethodFlex());
+      await replyFlex(event.replyToken, contactMethodFlex(event.replyToken));
       return;
     }
     if (step === 5) {
@@ -88,7 +84,7 @@ app.post("/webhook", async (req, res) => {
       const u = convo.getUserAll(userId);
       await axios.post("https://notify-api.line.me/api/notify",
         new URLSearchParams({
-          message: `📩 有新客戶填寫完整資料：\n公司：${u.company}\n產業：${u.industry}\n需求：${u.need}\n預算：${u.budget}\n時間：${u.time}\n聯絡方式：${u.contact}`
+          message: `\u{1F4E9} 有新客戶填寫完整資料：\n公司：${u.company}\n產業：${u.industry}\n需求：${u.need}\n預算：${u.budget}\n時間：${u.time}\n聯絡方式：${u.contact}`
         }), {
           headers: {
             Authorization: `Bearer ${LINE_NOTIFY_TOKEN}`,
@@ -97,19 +93,17 @@ app.post("/webhook", async (req, res) => {
         }
       );
 
-      await replyFlex(event.replyToken, aiOrHumanChoice());
+      await replyFlex(event.replyToken, aiOrHumanChoice(event.replyToken));
       convo.updateUserStep(userId, "final", "sent", 100);
       return;
     }
 
-    // 若尚未開始導引流程，啟動對話
     if (step === -1 || step >= 100) {
       convo.updateUserStep(userId, "company", "", 0);
-      await replyText(event.replyToken, "👋 歡迎洽詢報價！請問您的公司名稱是？");
+      await replyText(event.replyToken, "\u{1F44B} 歡迎洽詢報價！請問您的公司名稱是？");
       return;
     }
 
-    // 其他問題 → AI 回覆
     try {
       const gpt = await axios.post("https://api.openai.com/v1/chat/completions", {
         model: "gpt-3.5-turbo",
@@ -146,6 +140,7 @@ function replyText(token, text) {
 }
 
 function replyFlex(token, flex) {
+  flex.replyToken = token;
   return axios.post("https://api.line.me/v2/bot/message/reply", flex, {
     headers: {
       Authorization: `Bearer ${LINE_ACCESS_TOKEN}`,
@@ -154,9 +149,9 @@ function replyFlex(token, flex) {
   });
 }
 
-function contactMethodFlex() {
+function contactMethodFlex(token) {
   return {
-    replyToken: null,
+    replyToken: token,
     messages: [
       {
         type: "flex",
@@ -168,7 +163,7 @@ function contactMethodFlex() {
             layout: "vertical",
             spacing: "md",
             contents: [
-              { type: "text", text: "📞 請選擇聯絡方式：", weight: "bold", wrap: true },
+              { type: "text", text: "\u{1F4DE} 請選擇聯絡方式：", weight: "bold", wrap: true },
               {
                 type: "box",
                 layout: "vertical",
@@ -187,9 +182,9 @@ function contactMethodFlex() {
   };
 }
 
-function aiOrHumanChoice() {
+function aiOrHumanChoice(token) {
   return {
-    replyToken: null,
+    replyToken: token,
     messages: [
       {
         type: "template",
@@ -209,5 +204,5 @@ function aiOrHumanChoice() {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🚀 LINE GPT Bot 正在監聽 port ${PORT} 🚀`);
+  console.log(`\u{1F680} LINE GPT Bot 正在監聽 port ${PORT} \u{1F680}`);
 });
